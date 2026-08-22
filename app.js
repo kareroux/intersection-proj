@@ -102,7 +102,7 @@ async function loadFlights() {
   const ne = map1.getBounds().getNorthEast();
   const radiusKm = haversine(center.lat, center.lng, ne.lat, ne.lng);
   const radiusNm = Math.max(5, Math.min(250, Math.round(radiusKm * 0.539957)));
-  const url = `https://api.adsb.lol/v2/point/${center.lat.toFixed(3)}/${center.lng.toFixed(3)}/${radiusNm}`;
+  const url = `https://api.adsb.lol/v2/lat/${center.lat.toFixed(3)}/lon/${center.lng.toFixed(3)}/dist/${radiusNm}`;
   const infoEl = document.getElementById("flightInfo");
   lastFetchTime = Date.now();
   try {
