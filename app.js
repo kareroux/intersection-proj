@@ -107,18 +107,22 @@ async function loadFlights() {
   lastFetchTime = Date.now();
   try {
     const res = await fetch(url, { cache: "no-store" });
+    const rawText = await res.text();
+    // TEMPORARY DEBUG LINE — always shows the exact request/response so we
+    // can see precisely what's happening. Safe to remove once confirmed working.
+    setStatusLine(`[DEBUG] ${url} → HTTP ${res.status} · ${rawText.slice(0, 150)}`);
+
     if (!res.ok) throw new Error("adsb.lol HTTP " + res.status);
-    const data = await res.json();
+    const data = JSON.parse(rawText);
     consecutiveFailures = 0;
-    setStatusLine("마지막 업데이트: " + new Date().toLocaleTimeString("ko-KR"));
 
     flightMarkers.forEach(m => map1.removeLayer(m));
     flightMarkers = [];
 
     const aircraft = data.ac || [];
-    if (aircraft.length === 0) {
-      infoEl.innerHTML = "현재 시야 범위 안에 표시할 항공편이 없습니다. 지도를 이동해보세요.";
-    }
+    infoEl.innerHTML = aircraft.length === 0
+      ? "현재 시야 범위 안에 표시할 항공편이 없습니다. 지도를 이동해보세요."
+      : `${aircraft.length}대의 항공편을 찾았습니다. 마커를 클릭해보세요.`;
 
     aircraft.slice(0, 200).forEach(s => {
       const id = s.hex;
@@ -159,7 +163,7 @@ async function loadFlights() {
     consecutiveFailures++;
     infoEl.innerHTML =
       `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${e.message}${consecutiveFailures > 1 ? ", " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
-    setStatusLine("마지막 시도: " + new Date().toLocaleTimeString("ko-KR") + " (실패)");
+    setStatusLine(`[DEBUG] ${url} → 오류: ${e.message}`);
     console.error("adsb.lol fetch failed:", e);
     if (consecutiveFailures >= 2) setTimeout(loadFlights, POLL_MS * 5);
   }
