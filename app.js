@@ -102,19 +102,24 @@ async function loadFlights() {
   const ne = map1.getBounds().getNorthEast();
   const radiusKm = haversine(center.lat, center.lng, ne.lat, ne.lng);
   const radiusNm = Math.max(5, Math.min(250, Math.round(radiusKm * 0.539957)));
-  const url = `https://api.adsb.lol/v2/lat/${center.lat.toFixed(3)}/lon/${center.lng.toFixed(3)}/dist/${radiusNm}`;
+  const targetUrl = `https://api.adsb.lol/v2/lat/${center.lat.toFixed(3)}/lon/${center.lng.toFixed(3)}/dist/${radiusNm}`;
+  // adsb.lol's server doesn't send CORS headers, so a browser fetch() from our
+  // page's origin gets silently blocked even though the API itself works fine
+  // (confirmed: visiting the URL directly returns real data). Routing through
+  // a CORS-adding proxy fixes this without needing our own backend.
+  const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
   const infoEl = document.getElementById("flightInfo");
   lastFetchTime = Date.now();
-  setStatusLine(`[DEBUG] 요청 중... ${url}`);
+  setStatusLine(`[DEBUG] 요청 중... ${targetUrl}`);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000); // fail fast instead of hanging forever
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // proxy adds a little latency
 
   try {
     const res = await fetch(url, { cache: "no-store", signal: controller.signal });
     clearTimeout(timeoutId);
     const rawText = await res.text();
-    setStatusLine(`[DEBUG] ${url} → HTTP ${res.status} · ${rawText.slice(0, 150)}`);
+    setStatusLine(`[DEBUG] ${targetUrl} → HTTP ${res.status} · ${rawText.slice(0, 150)}`);
 
     if (!res.ok) throw new Error("adsb.lol HTTP " + res.status);
     const data = JSON.parse(rawText);
@@ -169,7 +174,7 @@ async function loadFlights() {
     const reason = e.name === "AbortError" ? "요청이 8초 안에 응답하지 않아 중단됨 (타임아웃)" : e.message;
     infoEl.innerHTML =
       `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${reason}${consecutiveFailures > 1 ? ", " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
-    setStatusLine(`[DEBUG] ${url} → 오류: ${reason}`);
+    setStatusLine(`[DEBUG] ${targetUrl} → 오류: ${reason}`);
     console.error("adsb.lol fetch failed:", e);
     if (consecutiveFailures >= 2) setTimeout(loadFlights, POLL_MS * 5);
   }
