@@ -105,11 +105,15 @@ async function loadFlights() {
   const url = `https://api.adsb.lol/v2/lat/${center.lat.toFixed(3)}/lon/${center.lng.toFixed(3)}/dist/${radiusNm}`;
   const infoEl = document.getElementById("flightInfo");
   lastFetchTime = Date.now();
+  setStatusLine(`[DEBUG] 요청 중... ${url}`);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000); // fail fast instead of hanging forever
+
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store", signal: controller.signal });
+    clearTimeout(timeoutId);
     const rawText = await res.text();
-    // TEMPORARY DEBUG LINE — always shows the exact request/response so we
-    // can see precisely what's happening. Safe to remove once confirmed working.
     setStatusLine(`[DEBUG] ${url} → HTTP ${res.status} · ${rawText.slice(0, 150)}`);
 
     if (!res.ok) throw new Error("adsb.lol HTTP " + res.status);
@@ -160,10 +164,12 @@ async function loadFlights() {
       flightMarkers.push(marker);
     });
   } catch (e) {
+    clearTimeout(timeoutId);
     consecutiveFailures++;
+    const reason = e.name === "AbortError" ? "요청이 8초 안에 응답하지 않아 중단됨 (타임아웃)" : e.message;
     infoEl.innerHTML =
-      `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${e.message}${consecutiveFailures > 1 ? ", " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
-    setStatusLine(`[DEBUG] ${url} → 오류: ${e.message}`);
+      `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${reason}${consecutiveFailures > 1 ? ", " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
+    setStatusLine(`[DEBUG] ${url} → 오류: ${reason}`);
     console.error("adsb.lol fetch failed:", e);
     if (consecutiveFailures >= 2) setTimeout(loadFlights, POLL_MS * 5);
   }
