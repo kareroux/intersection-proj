@@ -62,13 +62,15 @@ document.getElementById("toBrowse").addEventListener("click", () => goTo("page5"
 
 /* ============================================================
    PAGE 1 — live flight map + locally-built flight paths
+   Uses adsb.lol (open, no key, no daily quota, built for browser use)
+   instead of OpenSky, which was silently blocking Safari's requests.
    ============================================================ */
 let map1, flightMarkers = [];
 const trails = {};
 const trailLines = {};
 const MAX_TRAIL_POINTS = 40;
-const POLL_MS = 90000;
-const MOVE_DEBOUNCE_MS = 15000;
+const POLL_MS = 20000; // no strict quota on adsb.lol, so we can refresh more often
+const MOVE_DEBOUNCE_MS = 5000;
 let lastFetchTime = 0;
 let consecutiveFailures = 0;
 
@@ -96,15 +98,16 @@ function setStatusLine(msg) {
 }
 
 async function loadFlights() {
-  const b = map1.getBounds();
-  const url = `https://opensky-network.org/api/states/all?lamin=${b.getSouth()}&lomin=${b.getWest()}&lamax=${b.getNorth()}&lomax=${b.getEast()}`;
+  const center = map1.getCenter();
+  const ne = map1.getBounds().getNorthEast();
+  const radiusKm = haversine(center.lat, center.lng, ne.lat, ne.lng);
+  const radiusNm = Math.max(5, Math.min(250, Math.round(radiusKm * 0.539957)));
+  const url = `https://api.adsb.lol/v2/point/${center.lat.toFixed(3)}/${center.lng.toFixed(3)}/${radiusNm}`;
   const infoEl = document.getElementById("flightInfo");
   lastFetchTime = Date.now();
   try {
     const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) {
-      throw new Error("OpenSky HTTP " + res.status + (res.status === 429 ? " (일일 무료 요청 한도 초과)" : ""));
-    }
+    if (!res.ok) throw new Error("adsb.lol HTTP " + res.status);
     const data = await res.json();
     consecutiveFailures = 0;
     setStatusLine("마지막 업데이트: " + new Date().toLocaleTimeString("ko-KR"));
@@ -112,38 +115,43 @@ async function loadFlights() {
     flightMarkers.forEach(m => map1.removeLayer(m));
     flightMarkers = [];
 
-    const states = data.states || [];
-    if (states.length === 0) {
+    const aircraft = data.ac || [];
+    if (aircraft.length === 0) {
       infoEl.innerHTML = "현재 시야 범위 안에 표시할 항공편이 없습니다. 지도를 이동해보세요.";
     }
 
-    states.slice(0, 200).forEach(s => {
-      const [icao24, callsign, country, , , lon, lat, , on_ground, velocity, track] = s;
+    aircraft.slice(0, 200).forEach(s => {
+      const id = s.hex;
+      const lat = s.lat, lon = s.lon;
       if (lat == null || lon == null) return;
+      const track = s.track || 0;
+      const callsign = (s.flight || "").trim();
+      const speedKmh = s.gs ? Math.round(s.gs * 1.852) : null; // gs is in knots
+      const altFt = s.alt_baro;
 
-      if (!trails[icao24]) trails[icao24] = [];
-      const last = trails[icao24][trails[icao24].length - 1];
+      if (!trails[id]) trails[id] = [];
+      const last = trails[id][trails[id].length - 1];
       if (!last || last[0] !== lat || last[1] !== lon) {
-        trails[icao24].push([lat, lon]);
-        if (trails[icao24].length > MAX_TRAIL_POINTS) trails[icao24].shift();
+        trails[id].push([lat, lon]);
+        if (trails[id].length > MAX_TRAIL_POINTS) trails[id].shift();
       }
-      if (trailLines[icao24]) map1.removeLayer(trailLines[icao24]);
-      if (trails[icao24].length > 1) {
-        trailLines[icao24] = L.polyline(trails[icao24], { color: "#4f97d6", weight: 2, opacity: 0.7 }).addTo(map1);
+      if (trailLines[id]) map1.removeLayer(trailLines[id]);
+      if (trails[id].length > 1) {
+        trailLines[id] = L.polyline(trails[id], { color: "#4f97d6", weight: 2, opacity: 0.7 }).addTo(map1);
       }
 
       const icon = L.divIcon({
         className: "plane-icon",
-        html: `<div style="transform:rotate(${track || 0}deg); font-size:16px;">\u2708\ufe0f</div>`,
+        html: `<div style="transform:rotate(${track}deg); font-size:16px;">\u2708\ufe0f</div>`,
         iconSize: [20, 20]
       });
       const marker = L.marker([lat, lon], { icon }).addTo(map1);
       marker.on("click", () => {
         infoEl.innerHTML =
-          `<b>Callsign:</b> ${(callsign || "\u2014").trim()}<br>` +
-          `<b>Country:</b> ${country}<br>` +
-          `<b>Speed:</b> ${velocity ? Math.round(velocity * 3.6) + " km/h" : "\u2014"}<br>` +
-          `<b>Status:</b> ${on_ground ? "On ground" : "In flight"}`;
+          `<b>Callsign:</b> ${callsign || "\u2014"}<br>` +
+          `<b>Altitude:</b> ${altFt != null ? altFt + " ft" : "\u2014"}<br>` +
+          `<b>Speed:</b> ${speedKmh ? speedKmh + " km/h" : "\u2014"}<br>` +
+          `<b>Type:</b> ${s.t || "\u2014"}`;
       });
       flightMarkers.push(marker);
     });
@@ -152,7 +160,7 @@ async function loadFlights() {
     infoEl.innerHTML =
       `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${e.message}${consecutiveFailures > 1 ? ", " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
     setStatusLine("마지막 시도: " + new Date().toLocaleTimeString("ko-KR") + " (실패)");
-    console.error("OpenSky fetch failed:", e);
+    console.error("adsb.lol fetch failed:", e);
     if (consecutiveFailures >= 2) setTimeout(loadFlights, POLL_MS * 5);
   }
 }
@@ -182,17 +190,18 @@ function curvedPath(p1, p2, curvature = 0.15) {
   return pts;
 }
 
-// random seat like "3B" out of a 7 x 16 grid, avoiding seats already taken
+// random seat like "13A" (row 1-30, column A-F — standard 3-3 narrow-body layout),
+// avoiding seats already assigned to someone else
 function assignRandomSeat(existingBookings) {
   const taken = new Set(existingBookings.map(b => b.seat));
-  const letters = "ABCDEFGHIJKLMNOP".split("");
+  const letters = "ABCDEF".split("");
   for (let attempt = 0; attempt < 300; attempt++) {
-    const pos = 1 + Math.floor(Math.random() * 7);
+    const row = 1 + Math.floor(Math.random() * 30);
     const letter = letters[Math.floor(Math.random() * letters.length)];
-    const seat = `${pos}${letter}`;
+    const seat = `${row}${letter}`;
     if (!taken.has(seat)) return seat;
   }
-  return `${1 + Math.floor(Math.random() * 7)}${letters[Math.floor(Math.random() * letters.length)]}`;
+  return `${1 + Math.floor(Math.random() * 30)}${letters[Math.floor(Math.random() * letters.length)]}`;
 }
 
 /* ============================================================
@@ -203,15 +212,6 @@ let fromCoords = null, toCoords = null;
 let booking = {};
 
 function initPage2() {
-  const fromSel = document.getElementById("bFrom");
-  KOREAN_CITIES.forEach(c => {
-    const opt = document.createElement("option");
-    opt.value = c.name;
-    opt.textContent = c.name;
-    opt.dataset.lat = c.lat;
-    opt.dataset.lon = c.lon;
-    fromSel.appendChild(opt);
-  });
   const dl = document.getElementById("airportList");
   AIRPORTS.forEach(a => {
     const opt = document.createElement("option");
@@ -224,10 +224,11 @@ function initPage2() {
     attribution: "&copy; OpenStreetMap contributors"
   }).addTo(map2);
 
-  fromSel.addEventListener("change", () => {
-    const c = KOREAN_CITIES.find(c => c.name === fromSel.value);
-    if (c) { fromCoords = { ...c }; updateRouteMap(); }
-  });
+  // FROM is fixed to Seoul/ICN by default — draggable to fine-tune the exact point
+  const icn = AIRPORTS.find(a => a.iata === "ICN");
+  fromCoords = { name: icn.name, lat: icn.lat, lon: icn.lon };
+  updateRouteMap();
+
   document.getElementById("bTo").addEventListener("change", (e) => {
     const a = AIRPORTS.find(a => a.name === e.target.value);
     if (a) { toCoords = { ...a }; updateRouteMap(); }
@@ -308,11 +309,10 @@ document.getElementById("toTicket").addEventListener("click", async () => {
 
   const missing = [];
   if (!name) missing.push("bName");
-  if (!fromCoords) missing.push("bFrom");
   if (!toMatch) missing.push("bTo");
   if (!reason) missing.push("bReason");
 
-  document.querySelectorAll(".form-col input, .form-col select, .form-col textarea").forEach(el => el.style.borderColor = "#ccc");
+  document.querySelectorAll(".form-col input, .form-col textarea").forEach(el => el.style.borderColor = "#ccc");
   if (missing.length) {
     missing.forEach(id => document.getElementById(id).style.borderColor = "#c0392b");
     document.getElementById("bHint").textContent = "\ubaa8\ub4e0 \uc815\ubcf4\ub97c \uc785\ub825\ud574\uc8fc\uc138\uc694.";
