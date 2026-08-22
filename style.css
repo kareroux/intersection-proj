@@ -1,0 +1,71 @@
+/* ===== EDIT THESE VARIABLES TO RESTYLE THE WHOLE SITE ===== */
+:root{
+  --orange: #f5b97f;
+  --orange-dark: #e69a4a;
+  --blue: #6fb1e8;
+  --blue-dark: #4f97d6;
+  --gray-bg: #f4f5f6;
+  --text: #222;
+  --radius: 10px;
+}
+
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif;
+  background: var(--gray-bg);
+  color: var(--text);
+}
+
+.page{ display:none; padding: 24px; max-width: 1200px; margin: 0 auto; }
+.page.active{ display:block; }
+
+.topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.page-label{ font-weight:600; font-size:1.1rem; background:#eee; padding:6px 14px; border-radius:8px; }
+
+.panel{ background:#fff; border:1px solid #ddd; border-radius: var(--radius); padding:20px; margin-bottom:16px; }
+
+.btn{ border:none; border-radius:8px; padding:12px 18px; font-size:1rem; cursor:pointer; font-weight:600; display:block; width:100%; margin-bottom:10px; }
+.btn.small{ width:auto; margin:0; padding:8px 14px; }
+.btn-orange{ background: var(--orange); color:#5a3a10; border:1px solid var(--orange-dark); }
+.btn-orange:hover{ background: var(--orange-dark); }
+
+/* ---------- PAGE 1 & shared big-map layout (also used by page5) ---------- */
+#page1 .panel, .routes-panel{ display:flex; gap:16px; }
+.map-big{ flex:1; height: 560px; border-radius: var(--radius); }
+.side-col{ width: 280px; display:flex; flex-direction:column; gap:10px; }
+.box{ border-radius: var(--radius); padding:16px; color:#fff; font-size:0.95rem; }
+.box-blue{ background: var(--blue); flex:1; }
+
+/* ---------- PAGE 2 : booking form + map ---------- */
+.two-col{ display:flex; gap:24px; }
+.form-col{ flex:1; display:flex; flex-direction:column; }
+.form-col label{ font-weight:600; margin:10px 0 4px; }
+.form-col input, .form-col select, .form-col textarea{
+  padding:10px; border-radius:6px; border:1px solid #ccc; font-size:0.95rem; font-family:inherit;
+}
+.map-col{ flex:1; }
+.map-med{ height:340px; border-radius: var(--radius); }
+.hint{ font-size:0.8rem; color:#a33; min-height:1.2em; }
+.hint-inline{ font-weight:400; font-size:0.78rem; color:#666; }
+
+/* ---------- ticket (live preview on page 2) ---------- */
+.ticket-wrap{ display:flex; align-items:center; gap:24px; justify-content:center; flex-wrap:wrap; }
+.ticket{ display:flex; background:#e8e8e8; border-radius: var(--radius); overflow:hidden; min-width:600px; }
+.ticket-left, .ticket-right{ padding:20px; flex:1; }
+.ticket-right{ background:#dde8f5; }
+.tk-label{ font-size:0.75rem; color:#666; margin:8px 0 0; }
+.tk-val{ font-weight:600; margin:0 0 6px; }
+.bp-title{ font-weight:700; font-size:1.1rem; }
+.qr{ width:100px; height:100px; margin-top:8px; }
+.stamp{
+  width:130px; height:130px; border-radius:50%; border:3px solid #4f97d6;
+  display:flex; align-items:center; justify-content:center; text-align:center;
+  font-size:0.8rem; font-weight:600; color:#4f97d6; padding:10px;
+  transform: rotate(-8deg);
+}
+
+.placeholder-text{ color:rgba(255,255,255,0.85); font-style:italic; }
+
+/* ---------- PAGE 5 : route lines on the map get a hover affordance ---------- */
+.route-line{ cursor:pointer; }

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>항공권 예매</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ PAGE 1 : LANDING ============ -->
+<section id="page1" class="page active">
+  <div class="panel">
+    <div id="map1" class="map-big"></div>
+    <div class="side-col">
+      <div class="box box-blue">
+        <p id="flightInfo">지도를 움직여 항공편 정보를 확인하세요.<br>(country, callsign, route)</p>
+      </div>
+      <button class="btn btn-orange" id="toBooking">항공권 예매</button>
+      <button class="btn btn-orange" id="toBrowse">다른 참가자 확인하기</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PAGE 2 : BOOKING + LIVE TICKET (combined) ============ -->
+<section id="page2" class="page">
+  <div class="topbar">
+    <span class="page-label">항공권 예매</span>
+    <button class="btn btn-orange small" data-goto="page1">처음으로</button>
+  </div>
+  <div class="panel two-col">
+    <div class="form-col">
+      <label>이름</label>
+      <input type="text" id="bName" placeholder="이름을 입력하세요">
+
+      <label>FROM</label>
+      <select id="bFrom"><option value="">-- 선택 --</option></select>
+
+      <label>TO</label>
+      <input list="airportList" id="bTo" placeholder="도시 또는 공항 검색 (기본: Seoul)">
+      <datalist id="airportList"></datalist>
+
+      <label>이 목적지는 어떤 것을 상징하나요? <span class="hint-inline">(다른 사용자들에게 표시됩니다)</span></label>
+      <textarea id="bReason" rows="2" maxlength="100" placeholder="예: 새로운 시작"></textarea>
+
+      <button class="btn btn-orange" id="toTicket">티켓 확정</button>
+      <p class="hint" id="bHint"></p>
+    </div>
+    <div class="map-col">
+      <div id="map2" class="map-med"></div>
+      <p class="hint-inline">지도 위 핀을 드래그해서 정확한 위치로 옮길 수 있습니다.</p>
+    </div>
+  </div>
+
+  <!-- live ticket preview -->
+  <div class="panel ticket-wrap">
+    <div class="ticket" id="ticketCard">
+      <div class="ticket-left">
+        <p class="tk-label">NAME:</p><p class="tk-val" id="tkName">—</p>
+        <p class="tk-val" id="tkFrom">FROM: —</p>
+        <p class="tk-val" id="tkTo">TO: —</p>
+        <p class="tk-label">이 여정이 상징하는 것:</p><p class="tk-val" id="tkReason">—</p>
+        <p class="tk-label">거리 · 예상 비행시간:</p><p class="tk-val" id="tkDistTime">—</p>
+      </div>
+      <div class="ticket-right">
+        <p class="bp-title">BOARDING PASS</p>
+        <p class="tk-val" id="tkRoute">—</p>
+        <p class="tk-val" id="tkSeat">SEAT: —</p>
+        <img id="tkQr" class="qr" alt="QR code">
+      </div>
+    </div>
+    <div class="stamp" id="tkStamp">목적지 선택 시<br>스탬프가 표시됩니다</div>
+  </div>
+</section>
+
+<!-- ============ PAGE 5 : 다른 사용자 둘러보기 (route map) ============ -->
+<section id="page5" class="page">
+  <div class="topbar">
+    <span class="page-label">다른 사용자 둘러보기</span>
+    <button class="btn btn-orange small" data-goto="page1">처음으로</button>
+  </div>
+  <div class="panel routes-panel">
+    <div id="map5" class="map-big"></div>
+    <div class="side-col">
+      <div class="box box-blue" id="routeInfoPanel">
+        <p class="placeholder-text">경로를 선택하면 그 사람의 티켓이 여기에 표시됩니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
