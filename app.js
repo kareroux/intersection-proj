@@ -1,100 +1,454 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>항공권 예매</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="style.css?v=2">
-</head>
-<body>
+/* ============================================================
+   CONFIG — paste your Supabase project details here once you've
+   created a free project at https://supabase.com (see README.md).
+   ============================================================ */
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
 
-<!-- ============ PAGE 1 : LANDING ============ -->
-<section id="page1" class="page active">
-  <div class="panel">
-    <iframe id="flightFrame" class="map-big" style="border:none;"
-      src="https://www.flightradar24.com/simple_index.php?lat=36.5&lon=127.8&z=6"></iframe>
-    <div class="side-col">
-      <div class="box box-blue">
-        <p>실시간 항공편 지도 (Flightradar24 제공). 지도 위 비행기를 클릭하면 상세 정보를 볼 수 있습니다.</p>
-        <p class="hint-inline" style="color:rgba(255,255,255,0.8);">자동으로 주기적으로 새로고침됩니다.</p>
-      </div>
-      <button class="btn btn-orange" id="toBooking">항공권 예매</button>
-      <button class="btn btn-orange" id="toBrowse">다른 참가자 확인하기</button>
-    </div>
-  </div>
-</section>
+let supabaseClient = null;
+if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
 
-<!-- ============ PAGE 2 : BOOKING + LIVE TICKET (combined) ============ -->
-<section id="page2" class="page">
-  <div class="topbar">
-    <span class="page-label">항공권 예매</span>
-    <button class="btn btn-orange small" data-goto="page1">처음으로</button>
-  </div>
-  <div class="panel two-col">
-    <div class="form-col">
-      <label>이름</label>
-      <input type="text" id="bName" placeholder="이름을 입력하세요">
+function showFatalError(msg) {
+  let banner = document.getElementById("fatalBanner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "fatalBanner";
+    banner.style.cssText = "background:#c0392b;color:#fff;padding:10px 16px;font-size:0.85rem;position:sticky;top:0;z-index:9999;";
+    document.body.prepend(banner);
+  }
+  banner.textContent = "오류: " + msg + " (자세한 내용은 브라우저 개발자 콘솔 확인)";
+  console.error(msg);
+}
 
-      <label>FROM</label>
-      <p class="hint-inline">핀을 드래그하여 시작지점을 설정하세요.</p>
+/* ---------- simple shared-storage layer ---------- */
+const DB = {
+  async getBookings() {
+    if (supabaseClient) {
+      const { data, error } = await supabaseClient.from("bookings").select("*");
+      if (error) { console.error(error); return []; }
+      return data;
+    }
+    return JSON.parse(localStorage.getItem("bookings") || "[]");
+  },
+  async addBooking(booking) {
+    if (supabaseClient) {
+      const { data, error } = await supabaseClient.from("bookings").insert(booking).select();
+      if (error) { console.error(error); return booking; }
+      return data[0];
+    }
+    const all = JSON.parse(localStorage.getItem("bookings") || "[]");
+    booking.id = "local-" + Date.now();
+    all.push(booking);
+    localStorage.setItem("bookings", JSON.stringify(all));
+    return booking;
+  }
+};
 
-      <label>TO</label>
-      <input list="airportList" id="bTo" placeholder="도시 또는 공항 검색 (기본: Seoul)">
-      <datalist id="airportList"></datalist>
+/* ---------- navigation ---------- */
+function goTo(id) {
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+  if (id === "page1" && map1) setTimeout(() => map1.invalidateSize(), 50);
+  if (id === "page2" && map2) setTimeout(() => map2.invalidateSize(), 50);
+  if (id === "page5") { setTimeout(() => map5 && map5.invalidateSize(), 50); renderRoutesPage(); }
+}
+document.querySelectorAll("[data-goto]").forEach(btn => {
+  btn.addEventListener("click", () => goTo(btn.dataset.goto));
+});
+document.getElementById("toBooking").addEventListener("click", () => goTo("page2"));
+document.getElementById("toBrowse").addEventListener("click", () => goTo("page5"));
 
-      <label>이 목적지는 어떤 것을 상징하나요? <span class="hint-inline">(다른 사용자들에게 표시됩니다)</span></label>
-      <textarea id="bReason" rows="2" maxlength="100" placeholder="예: 새로운 시작"></textarea>
 
-      <button class="btn btn-orange" id="toTicket">티켓 확정</button>
-      <p class="hint" id="bHint"></p>
-    </div>
-    <div class="map-col">
-      <div id="map2" class="map-med"></div>
-      <p class="hint-inline">지도 위 핀을 드래그해서 정확한 위치로 옮길 수 있습니다.</p>
-    </div>
-  </div>
+/* ============================================================
+   PAGE 1 — live flight map + locally-built flight paths
+   Uses XMLHttpRequest instead of fetch() — Safari has known bugs
+   where fetch() fails silently ("Load failed") in situations XHR
+   handles fine, which matches everything observed so far: every
+   fetch() attempt failed identically regardless of target domain,
+   network, or proxy, while direct navigation to the same URL works.
+   ============================================================ */
+let map1, flightMarkers = [];
+const trails = {};
+const trailLines = {};
+const MAX_TRAIL_POINTS = 40;
+const POLL_MS = 20000;
+const MOVE_DEBOUNCE_MS = 5000;
+let lastFetchTime = 0;
+let consecutiveFailures = 0;
 
-  <!-- live ticket preview -->
-  <div class="panel ticket-wrap">
-    <div class="ticket" id="ticketCard">
-      <div class="ticket-left">
-        <p class="tk-label">NAME:</p><p class="tk-val" id="tkName">—</p>
-        <p class="tk-val" id="tkFrom">FROM: —</p>
-        <p class="tk-val" id="tkTo">TO: —</p>
-        <p class="tk-label">이 여정이 상징하는 것:</p><p class="tk-val" id="tkReason">—</p>
-        <p class="tk-label">거리 · 예상 비행시간:</p><p class="tk-val" id="tkDistTime">—</p>
-      </div>
-      <div class="ticket-right">
-        <p class="bp-title">BOARDING PASS</p>
-        <p class="tk-val" id="tkRoute">—</p>
-        <p class="tk-val" id="tkSeat">SEAT: —</p>
-        <img id="tkQr" class="qr" alt="QR code">
-      </div>
-    </div>
-    <div class="stamp" id="tkStamp">목적지 선택 시<br>스탬프가 표시됩니다</div>
-  </div>
-</section>
+function initMap1() {
+  map1 = L.map("map1").setView([36.5, 127.8], 6);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map1);
+  loadFlights();
+  map1.on("moveend", () => {
+    if (Date.now() - lastFetchTime > MOVE_DEBOUNCE_MS) loadFlights();
+  });
+  setInterval(loadFlights, POLL_MS);
+}
 
-<!-- ============ PAGE 5 : 다른 사용자 둘러보기 (route map) ============ -->
-<section id="page5" class="page">
-  <div class="topbar">
-    <span class="page-label">다른 사용자 둘러보기</span>
-    <button class="btn btn-orange small" data-goto="page1">처음으로</button>
-  </div>
-  <div class="panel routes-panel">
-    <div id="map5" class="map-big"></div>
-    <div class="side-col">
-      <div class="box box-blue" id="routeInfoPanel">
-        <p class="placeholder-text">경로를 선택하면 그 사람의 티켓이 여기에 표시됩니다.</p>
-      </div>
-    </div>
-  </div>
-</section>
+function setStatusLine(msg) {
+  let el = document.getElementById("flightStatusLine");
+  if (!el) {
+    el = document.createElement("p");
+    el.id = "flightStatusLine";
+    el.style.cssText = "font-size:0.7rem;opacity:0.75;margin-top:6px;";
+    document.getElementById("flightInfo").after(el);
+  }
+  el.textContent = msg;
+}
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="data.js?v=6"></script>
-<script src="app.js?v=6"></script>
-</body>
-</html>
+// XMLHttpRequest-based GET with a timeout, wrapped as a Promise.
+// Resolves to { status, text } on any completed response (even non-2xx),
+// rejects only on a genuine network-level failure or timeout.
+function xhrGet(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", url, true);
+    xhr.timeout = timeoutMs;
+    xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
+    xhr.onerror = () => reject(new Error("네트워크 오류 (XHR onerror)"));
+    xhr.ontimeout = () => reject(new Error(timeoutMs / 1000 + "초 안에 응답 없음 (타임아웃)"));
+    xhr.send();
+  });
+}
+
+async function loadFlights() {
+  const center = map1.getCenter();
+  const ne = map1.getBounds().getNorthEast();
+  const radiusKm = haversine(center.lat, center.lng, ne.lat, ne.lng);
+  const radiusNm = Math.max(5, Math.min(250, Math.round(radiusKm * 0.539957)));
+  const targetUrl = `https://api.adsb.lol/v2/lat/${center.lat.toFixed(3)}/lon/${center.lng.toFixed(3)}/dist/${radiusNm}`;
+  const infoEl = document.getElementById("flightInfo");
+  lastFetchTime = Date.now();
+
+  const attempts = [
+    { label: "XHR 직접", url: targetUrl },
+    { label: "XHR + allorigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}` },
+    { label: "fetch 직접", url: targetUrl, useFetch: true },
+  ];
+
+  let lastError = null;
+  for (const attempt of attempts) {
+    setStatusLine(`[DEBUG] 시도 중 (${attempt.label})...`);
+    try {
+      let status, text;
+      if (attempt.useFetch) {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch(attempt.url, { cache: "no-store", signal: controller.signal });
+        clearTimeout(t);
+        status = res.status;
+        text = await res.text();
+      } else {
+        const r = await xhrGet(attempt.url, 6000);
+        status = r.status;
+        text = r.text;
+      }
+      setStatusLine(`[DEBUG] (${attempt.label}) → HTTP ${status} · ${text.slice(0, 120)}`);
+      if (status < 200 || status >= 300) throw new Error(`${attempt.label} HTTP ${status}`);
+
+      const data = JSON.parse(text);
+      consecutiveFailures = 0;
+
+      flightMarkers.forEach(m => map1.removeLayer(m));
+      flightMarkers = [];
+
+      const aircraft = data.ac || [];
+      infoEl.innerHTML = aircraft.length === 0
+        ? "현재 시야 범위 안에 표시할 항공편이 없습니다. 지도를 이동해보세요."
+        : `${aircraft.length}대의 항공편을 찾았습니다 (${attempt.label}). 마커를 클릭해보세요.`;
+
+      aircraft.slice(0, 200).forEach(s => {
+        const id = s.hex;
+        const lat = s.lat, lon = s.lon;
+        if (lat == null || lon == null) return;
+        const track = s.track || 0;
+        const callsign = (s.flight || "").trim();
+        const speedKmh = s.gs ? Math.round(s.gs * 1.852) : null;
+        const altFt = s.alt_baro;
+
+        if (!trails[id]) trails[id] = [];
+        const last = trails[id][trails[id].length - 1];
+        if (!last || last[0] !== lat || last[1] !== lon) {
+          trails[id].push([lat, lon]);
+          if (trails[id].length > MAX_TRAIL_POINTS) trails[id].shift();
+        }
+        if (trailLines[id]) map1.removeLayer(trailLines[id]);
+        if (trails[id].length > 1) {
+          trailLines[id] = L.polyline(trails[id], { color: "#4f97d6", weight: 2, opacity: 0.7 }).addTo(map1);
+        }
+
+        const icon = L.divIcon({
+          className: "plane-icon",
+          html: `<div style="transform:rotate(${track}deg); font-size:16px;">\u2708\ufe0f</div>`,
+          iconSize: [20, 20]
+        });
+        const marker = L.marker([lat, lon], { icon }).addTo(map1);
+        marker.on("click", () => {
+          infoEl.innerHTML =
+            `<b>Callsign:</b> ${callsign || "\u2014"}<br>` +
+            `<b>Altitude:</b> ${altFt != null ? altFt + " ft" : "\u2014"}<br>` +
+            `<b>Speed:</b> ${speedKmh ? speedKmh + " km/h" : "\u2014"}<br>` +
+            `<b>Type:</b> ${s.t || "\u2014"}`;
+        });
+        flightMarkers.push(marker);
+      });
+
+      return; // success
+    } catch (e) {
+      lastError = `${attempt.label}: ${e.message}`;
+      console.error("flight fetch attempt failed:", attempt.label, e);
+    }
+  }
+
+  consecutiveFailures++;
+  infoEl.innerHTML =
+    `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${lastError}${consecutiveFailures > 1 ? ", " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
+  setStatusLine(`[DEBUG] 모든 시도 실패 → ${lastError}`);
+  if (consecutiveFailures >= 2) setTimeout(loadFlights, POLL_MS * 5);
+}
+
+/* ---------- shared helpers ---------- */
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// gently-curved (parenthesis-like) arc between two points, always bowing north
+function curvedPath(p1, p2, curvature = 0.15) {
+  const [lat1, lng1] = p1, [lat2, lng2] = p2;
+  const midLat = (lat1 + lat2) / 2;
+  const midLng = (lng1 + lng2) / 2;
+  const distDeg = Math.hypot(lat2 - lat1, lng2 - lng1);
+  const bowLat = midLat + distDeg * curvature;
+  const pts = [];
+  for (let t = 0; t <= 1.0001; t += 0.04) {
+    const lat = (1 - t) ** 2 * lat1 + 2 * (1 - t) * t * bowLat + t ** 2 * lat2;
+    const lng = (1 - t) ** 2 * lng1 + 2 * (1 - t) * t * midLng + t ** 2 * lng2;
+    pts.push([lat, lng]);
+  }
+  return pts;
+}
+
+// random seat like "13A" (row 1-30, column A-F — standard 3-3 narrow-body layout),
+// avoiding seats already assigned to someone else
+function assignRandomSeat(existingBookings) {
+  const taken = new Set(existingBookings.map(b => b.seat));
+  const letters = "ABCDEF".split("");
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const row = 1 + Math.floor(Math.random() * 30);
+    const letter = letters[Math.floor(Math.random() * letters.length)];
+    const seat = `${row}${letter}`;
+    if (!taken.has(seat)) return seat;
+  }
+  return `${1 + Math.floor(Math.random() * 30)}${letters[Math.floor(Math.random() * letters.length)]}`;
+}
+
+/* ============================================================
+   PAGE 2 — booking form + live ticket (combined)
+   ============================================================ */
+let map2, fromMarker, toMarker, routeLine;
+let fromCoords = null, toCoords = null;
+let booking = {};
+
+function initPage2() {
+  const dl = document.getElementById("airportList");
+  AIRPORTS.forEach(a => {
+    const opt = document.createElement("option");
+    opt.value = a.name;
+    dl.appendChild(opt);
+  });
+
+  map2 = L.map("map2").setView([37.5, 127], 5);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map2);
+
+  // FROM is fixed to Seoul/ICN by default — draggable to fine-tune the exact point
+  const icn = AIRPORTS.find(a => a.iata === "ICN");
+  fromCoords = { name: icn.name, lat: icn.lat, lon: icn.lon };
+  updateRouteMap();
+
+  document.getElementById("bTo").addEventListener("change", (e) => {
+    const a = AIRPORTS.find(a => a.name === e.target.value);
+    if (a) { toCoords = { ...a }; updateRouteMap(); }
+  });
+  ["bName", "bReason"].forEach(id => {
+    document.getElementById(id).addEventListener("input", updateTicketPreview);
+  });
+}
+
+function updateRouteMap() {
+  if (fromMarker) map2.removeLayer(fromMarker);
+  if (toMarker) map2.removeLayer(toMarker);
+  if (routeLine) map2.removeLayer(routeLine);
+
+  const points = [];
+  if (fromCoords) {
+    fromMarker = L.marker([fromCoords.lat, fromCoords.lon], { draggable: true })
+      .addTo(map2).bindPopup("FROM: " + fromCoords.name);
+    fromMarker.on("dragend", () => {
+      const p = fromMarker.getLatLng();
+      fromCoords.lat = p.lat; fromCoords.lon = p.lng;
+      updateRouteMap();
+    });
+    points.push([fromCoords.lat, fromCoords.lon]);
+  }
+  if (toCoords) {
+    toMarker = L.marker([toCoords.lat, toCoords.lon], { draggable: true })
+      .addTo(map2).bindPopup("TO: " + toCoords.name);
+    toMarker.on("dragend", () => {
+      const p = toMarker.getLatLng();
+      toCoords.lat = p.lat; toCoords.lon = p.lng;
+      updateRouteMap();
+    });
+    points.push([toCoords.lat, toCoords.lon]);
+  }
+
+  if (fromCoords && toCoords) {
+    const arc = curvedPath([fromCoords.lat, fromCoords.lon], [toCoords.lat, toCoords.lon]);
+    routeLine = L.polyline(arc, { color: "#e69a4a", weight: 3 }).addTo(map2);
+    map2.fitBounds(points, { padding: [30, 30] });
+  } else if (points.length === 1) {
+    map2.setView(points[0], 9);
+  }
+  updateTicketPreview();
+}
+
+function updateTicketPreview() {
+  const name = document.getElementById("bName").value.trim();
+  const reason = document.getElementById("bReason").value.trim();
+
+  document.getElementById("tkName").textContent = name || "—";
+  document.getElementById("tkFrom").textContent = "FROM: " + (fromCoords ? fromCoords.name : "—");
+  document.getElementById("tkTo").textContent = "TO: " + (toCoords ? toCoords.name : "—");
+  document.getElementById("tkReason").textContent = reason || "—";
+  document.getElementById("tkRoute").textContent = (fromCoords && toCoords)
+    ? `FROM ${fromCoords.name} \u2192 TO ${toCoords.name}` : "—";
+  document.getElementById("tkSeat").textContent = "SEAT: " + (booking.seat || "—");
+
+  if (fromCoords && toCoords) {
+    const dist = haversine(fromCoords.lat, fromCoords.lon, toCoords.lat, toCoords.lon);
+    document.getElementById("tkDistTime").textContent =
+      `\uc57d ${Math.round(dist).toLocaleString()} km \u00b7 \uc57d ${(dist / 800).toFixed(1)}\uc2dc\uac04`;
+  } else {
+    document.getElementById("tkDistTime").textContent = "—";
+  }
+
+  const stamp = document.getElementById("tkStamp");
+  stamp.innerHTML = (toCoords && toCoords.iso2)
+    ? `<img src="https://flagcdn.com/w80/${toCoords.iso2}.png" style="width:50px;border-radius:4px;"><br>${toCoords.country}`
+    : "\ubaa9\uc801\uc9c0 \uc120\ud0dd \uc2dc<br>\uc2a4\ud0ec\ud504\uac00 \ud45c\uc2dc\ub429\ub2c8\ub2e4";
+}
+
+document.getElementById("toTicket").addEventListener("click", async () => {
+  const name = document.getElementById("bName").value.trim();
+  const reason = document.getElementById("bReason").value.trim();
+  const toVal = document.getElementById("bTo").value.trim();
+  const toMatch = AIRPORTS.find(a => a.name === toVal);
+
+  const missing = [];
+  if (!name) missing.push("bName");
+  if (!toMatch) missing.push("bTo");
+  if (!reason) missing.push("bReason");
+
+  document.querySelectorAll(".form-col input, .form-col textarea").forEach(el => el.style.borderColor = "#ccc");
+  if (missing.length) {
+    missing.forEach(id => document.getElementById(id).style.borderColor = "#c0392b");
+    document.getElementById("bHint").textContent = "\ubaa8\ub4e0 \uc815\ubcf4\ub97c \uc785\ub825\ud574\uc8fc\uc138\uc694.";
+    return;
+  }
+  document.getElementById("bHint").textContent = "";
+  toCoords = { ...toMatch };
+
+  const existing = await DB.getBookings();
+  const seat = assignRandomSeat(existing);
+
+  const full = {
+    name, reason, seat,
+    from_name: fromCoords.name, from_lat: fromCoords.lat, from_lon: fromCoords.lon,
+    to_name: toMatch.name, to_country: toMatch.country, to_iso2: toMatch.iso2,
+    to_lat: toMatch.lat, to_lon: toMatch.lon,
+    created_at: new Date().toISOString()
+  };
+  const saved = await DB.addBooking(full);
+  booking = saved;
+  updateTicketPreview();
+
+  // brief pause so the person actually sees their finished ticket before we move on
+  setTimeout(() => goTo("page5"), 1200);
+});
+
+/* ============================================================
+   PAGE 5 — 다른 사용자 둘러보기: every booked trip as a curved
+   route line; click a line to see that person's ticket.
+   ============================================================ */
+let map5, routeLayers = [];
+let selectedRouteLayer = null;
+
+function initMap5() {
+  map5 = L.map("map5").setView([20, 60], 2);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map5);
+}
+
+async function renderRoutesPage() {
+  if (!map5) initMap5();
+  routeLayers.forEach(l => map5.removeLayer(l));
+  routeLayers = [];
+  selectedRouteLayer = null;
+
+  const bookings = await DB.getBookings();
+  const panel = document.getElementById("routeInfoPanel");
+
+  if (bookings.length === 0) {
+    panel.innerHTML = `<p class="placeholder-text">아직 아무도 여정을 등록하지 않았습니다.</p>`;
+    return;
+  }
+  panel.innerHTML = `<p class="placeholder-text">경로를 선택하면 그 사람의 티켓이 여기에 표시됩니다.</p>`;
+
+  const allPoints = [];
+  bookings.forEach(b => {
+    if (b.from_lat == null || b.to_lat == null) return;
+    const arc = curvedPath([b.from_lat, b.from_lon], [b.to_lat, b.to_lon]);
+    const line = L.polyline(arc, { color: "#4f97d6", weight: 2.5, opacity: 0.75, className: "route-line" }).addTo(map5);
+    line.on("click", () => selectRoute(line, b));
+    line.on("mouseover", () => line.setStyle({ weight: 4, opacity: 1 }));
+    line.on("mouseout", () => { if (line !== selectedRouteLayer) line.setStyle({ weight: 2.5, opacity: 0.75 }); });
+    routeLayers.push(line);
+    allPoints.push([b.from_lat, b.from_lon], [b.to_lat, b.to_lon]);
+  });
+
+  if (allPoints.length) map5.fitBounds(allPoints, { padding: [40, 40] });
+}
+
+function selectRoute(line, b) {
+  if (selectedRouteLayer) selectedRouteLayer.setStyle({ color: "#4f97d6", weight: 2.5, opacity: 0.75 });
+  line.setStyle({ color: "#e69a4a", weight: 4, opacity: 1 });
+  selectedRouteLayer = line;
+
+  const dist = haversine(b.from_lat, b.from_lon, b.to_lat, b.to_lon);
+  document.getElementById("routeInfoPanel").innerHTML = `
+    <p style="font-weight:700;margin-bottom:6px;">${b.name}</p>
+    <p>FROM ${b.from_name} \u2192 TO ${b.to_name}</p>
+    <p style="margin-top:8px;"><b>\uc774 \uc5ec\uc815\uc774 \uc0c1\uc9d5\ud558\ub294 \uac83:</b><br>${b.reason || "\u2014"}</p>
+    <p style="margin-top:8px;">\uc57d ${Math.round(dist).toLocaleString()} km \u00b7 \uc57d ${(dist / 800).toFixed(1)}\uc2dc\uac04</p>
+    <p style="margin-top:8px;">SEAT: ${b.seat}</p>
+  `;
+}
+
+/* ---------- init ---------- */
+try {
+  initMap1();
+  initPage2();
+} catch (e) {
+  showFatalError(e.message);
+}
