@@ -50,7 +50,6 @@ const DB = {
 function goTo(id) {
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.getElementById(id).classList.add("active");
-  if (id === "page1" && map1) setTimeout(() => map1.invalidateSize(), 50);
   if (id === "page2" && map2) setTimeout(() => map2.invalidateSize(), 50);
   if (id === "page5") { setTimeout(() => map5 && map5.invalidateSize(), 50); renderRoutesPage(); }
 }
@@ -60,145 +59,26 @@ document.querySelectorAll("[data-goto]").forEach(btn => {
 document.getElementById("toBooking").addEventListener("click", () => goTo("page2"));
 document.getElementById("toBrowse").addEventListener("click", () => goTo("page5"));
 
+
 /* ============================================================
-   PAGE 1 — live flight map + locally-built flight paths
-   Uses adsb.lol (open, no key, no daily quota, built for browser use)
-   instead of OpenSky, which was silently blocking Safari's requests.
+   PAGE 1 — live flight map
+   Uses Flightradar24's official embeddable widget (simple_index.php),
+   made specifically for embedding on other sites via iframe. This
+   avoids all the CORS/fetch problems of calling flight-data APIs
+   directly from browser JS — Flightradar24 serves and refreshes the
+   map entirely on their own infrastructure inside the iframe.
    ============================================================ */
-let map1, flightMarkers = [];
-const trails = {};
-const trailLines = {};
-const MAX_TRAIL_POINTS = 40;
-const POLL_MS = 20000; // no strict quota on adsb.lol, so we can refresh more often
-const MOVE_DEBOUNCE_MS = 5000;
-let lastFetchTime = 0;
-let consecutiveFailures = 0;
+const FLIGHT_IFRAME_REFRESH_MS = 10 * 60 * 1000; // reload every 10 min as a safety net
 
 function initMap1() {
-  map1 = L.map("map1").setView([36.5, 127.8], 6);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(map1);
-  loadFlights();
-  map1.on("moveend", () => {
-    if (Date.now() - lastFetchTime > MOVE_DEBOUNCE_MS) loadFlights();
-  });
-  setInterval(loadFlights, POLL_MS);
-}
-
-function setStatusLine(msg) {
-  let el = document.getElementById("flightStatusLine");
-  if (!el) {
-    el = document.createElement("p");
-    el.id = "flightStatusLine";
-    el.style.cssText = "font-size:0.7rem;opacity:0.75;margin-top:6px;";
-    document.getElementById("flightInfo").after(el);
-  }
-  el.textContent = msg;
-}
-
-// fetch a URL but give up after `ms` milliseconds instead of hanging forever
-async function fetchWithTimeout(url, ms) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), ms);
-  try {
-    const res = await fetch(url, { cache: "no-store", signal: controller.signal });
-    return res;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function loadFlights() {
-  const center = map1.getCenter();
-  const ne = map1.getBounds().getNorthEast();
-  const radiusKm = haversine(center.lat, center.lng, ne.lat, ne.lng);
-  const radiusNm = Math.max(5, Math.min(250, Math.round(radiusKm * 0.539957)));
-  const targetUrl = `https://api.adsb.lol/v2/lat/${center.lat.toFixed(3)}/lon/${center.lng.toFixed(3)}/dist/${radiusNm}`;
-  const infoEl = document.getElementById("flightInfo");
-  lastFetchTime = Date.now();
-
-  // adsb.lol itself doesn't send CORS headers, so a plain fetch() from our
-  // page gets blocked even though the API works fine (confirmed by visiting
-  // it directly). We try a direct fetch first, then fall back through a
-  // couple of CORS-adding proxies in case one of them is slow or down.
-  const attempts = [
-    { label: "direct", url: targetUrl, unwrap: (t) => t },
-    { label: "allorigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, unwrap: (t) => t },
-    { label: "corsproxy.io", url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, unwrap: (t) => t },
-    { label: "thingproxy", url: `https://thingproxy.freeboard.io/fetch/${targetUrl}`, unwrap: (t) => t },
-  ];
-
-  let lastError = null;
-  for (const attempt of attempts) {
-    setStatusLine(`[DEBUG] 시도 중 (${attempt.label})... ${targetUrl}`);
-    try {
-      const res = await fetchWithTimeout(attempt.url, 6000);
-      const rawText = attempt.unwrap(await res.text());
-      setStatusLine(`[DEBUG] (${attempt.label}) ${targetUrl} → HTTP ${res.status} · ${rawText.slice(0, 120)}`);
-      if (!res.ok) throw new Error(`${attempt.label} HTTP ${res.status}`);
-
-      const data = JSON.parse(rawText);
-      consecutiveFailures = 0;
-
-      flightMarkers.forEach(m => map1.removeLayer(m));
-      flightMarkers = [];
-
-      const aircraft = data.ac || [];
-      infoEl.innerHTML = aircraft.length === 0
-        ? "현재 시야 범위 안에 표시할 항공편이 없습니다. 지도를 이동해보세요."
-        : `${aircraft.length}대의 항공편을 찾았습니다 (${attempt.label}). 마커를 클릭해보세요.`;
-
-      aircraft.slice(0, 200).forEach(s => {
-        const id = s.hex;
-        const lat = s.lat, lon = s.lon;
-        if (lat == null || lon == null) return;
-        const track = s.track || 0;
-        const callsign = (s.flight || "").trim();
-        const speedKmh = s.gs ? Math.round(s.gs * 1.852) : null;
-        const altFt = s.alt_baro;
-
-        if (!trails[id]) trails[id] = [];
-        const last = trails[id][trails[id].length - 1];
-        if (!last || last[0] !== lat || last[1] !== lon) {
-          trails[id].push([lat, lon]);
-          if (trails[id].length > MAX_TRAIL_POINTS) trails[id].shift();
-        }
-        if (trailLines[id]) map1.removeLayer(trailLines[id]);
-        if (trails[id].length > 1) {
-          trailLines[id] = L.polyline(trails[id], { color: "#4f97d6", weight: 2, opacity: 0.7 }).addTo(map1);
-        }
-
-        const icon = L.divIcon({
-          className: "plane-icon",
-          html: `<div style="transform:rotate(${track}deg); font-size:16px;">\u2708\ufe0f</div>`,
-          iconSize: [20, 20]
-        });
-        const marker = L.marker([lat, lon], { icon }).addTo(map1);
-        marker.on("click", () => {
-          infoEl.innerHTML =
-            `<b>Callsign:</b> ${callsign || "\u2014"}<br>` +
-            `<b>Altitude:</b> ${altFt != null ? altFt + " ft" : "\u2014"}<br>` +
-            `<b>Speed:</b> ${speedKmh ? speedKmh + " km/h" : "\u2014"}<br>` +
-            `<b>Type:</b> ${s.t || "\u2014"}`;
-        });
-        flightMarkers.push(marker);
-      });
-
-      return; // success — stop trying further fallbacks
-    } catch (e) {
-      lastError = e.name === "AbortError" ? `${attempt.label}: 6초 안에 응답 없음 (타임아웃)` : `${attempt.label}: ${e.message}`;
-      console.error("flight fetch attempt failed:", attempt.label, e);
-      // fall through to the next attempt
-    }
-  }
-
-  // every attempt failed
-  consecutiveFailures++;
-  infoEl.innerHTML =
-    `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${lastError}${consecutiveFailures > 1 ? ", " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
-  setStatusLine(`[DEBUG] 모든 시도 실패 → ${lastError}`);
-  if (consecutiveFailures >= 2) setTimeout(loadFlights, POLL_MS * 5);
+  const frame = document.getElementById("flightFrame");
+  if (!frame) return;
+  const baseSrc = frame.src;
+  setInterval(() => {
+    // reassigning src forces a clean reload, guarding against the embed
+    // going stale or erroring out during a long exhibition run
+    frame.src = baseSrc;
+  }, FLIGHT_IFRAME_REFRESH_MS);
 }
 
 /* ---------- shared helpers ---------- */
