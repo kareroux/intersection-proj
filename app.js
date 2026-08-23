@@ -131,9 +131,9 @@ async function loadFlights() {
     { label: "fetch 직접", url: targetUrl, useFetch: true },
   ];
 
-  let lastError = null;
+  const history = [];
   for (const attempt of attempts) {
-    setStatusLine(`[DEBUG] 시도 중 (${attempt.label})...`);
+    setStatusLine(`[DEBUG] 시도 중 (${attempt.label})... 지금까지: ${history.join(" | ") || "없음"}`);
     try {
       let status, text;
       if (attempt.useFetch) {
@@ -148,7 +148,7 @@ async function loadFlights() {
         status = r.status;
         text = r.text;
       }
-      setStatusLine(`[DEBUG] (${attempt.label}) → HTTP ${status} · ${text.slice(0, 120)}`);
+      history.push(`${attempt.label}: HTTP ${status}`);
       if (status < 200 || status >= 300) throw new Error(`${attempt.label} HTTP ${status}`);
 
       const data = JSON.parse(text);
@@ -200,15 +200,16 @@ async function loadFlights() {
 
       return; // success
     } catch (e) {
-      lastError = `${attempt.label}: ${e.message}`;
+      history.push(`${attempt.label}: ${e.message}`);
       console.error("flight fetch attempt failed:", attempt.label, e);
     }
   }
 
   consecutiveFailures++;
+  const summary = history.join(" | ");
   infoEl.innerHTML =
-    `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${lastError}${consecutiveFailures > 1 ? ", " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
-  setStatusLine(`[DEBUG] 모든 시도 실패 → ${lastError}`);
+    `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${summary}${consecutiveFailures > 1 ? " · " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
+  setStatusLine(`[DEBUG] 모든 시도 실패 → ${summary}`);
   if (consecutiveFailures >= 2) setTimeout(loadFlights, POLL_MS * 5);
 }
 
