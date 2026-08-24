@@ -33,6 +33,9 @@ body{
 /* ---------- PAGE 1 & shared big-map layout (also used by page5) ---------- */
 #page1 .panel, .routes-panel{ display:flex; gap:16px; }
 .map-big{ flex:1; height: 560px; border-radius: var(--radius); }
+
+/* darken just the map tiles (not markers/popups/lines) for contrast with plane icons */
+#map1 .leaflet-tile-pane{ filter: brightness(0.55) saturate(0.75) contrast(1.15); }
 .side-col{ width: 280px; display:flex; flex-direction:column; gap:10px; }
 .box{ border-radius: var(--radius); padding:16px; color:#fff; font-size:0.95rem; }
 .box-blue{ background: var(--blue); flex:1; }
@@ -69,3 +72,11 @@ body{
 
 /* ---------- PAGE 5 : route lines on the map get a hover affordance ---------- */
 .route-line{ cursor:pointer; }
+
+/* ---------- PAGE 1 : flight map launch panel ---------- */
+.flight-launch{
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:12px; text-align:center; padding:40px; background:#eef3f8;
+}
+.flight-launch-title{ font-size:1.3rem; font-weight:700; }
+.flight-launch-sub{ color:#666; max-width:360px; }
