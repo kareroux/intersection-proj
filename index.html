@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>항공권 예매</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -16,6 +16,7 @@
     <div class="side-col">
       <div class="box box-blue">
         <p id="flightInfo">지도를 움직여 항공편 정보를 확인하세요.<br>(country, callsign, route)</p>
+        <p class="flight-poem">이동이라는 행위, 가고 싶은 위치는 곧 우리의 지향점을 상징합니다.<br><br>지금 가장 가고 싶은 곳은 어떤 기대를 상징하나요? 밟고 있는 경로를 계속 따라간다면 도착할 수 있을까요?</p>
       </div>
       <button class="btn btn-orange" id="toBooking">항공권 예매</button>
       <button class="btn btn-orange" id="toBrowse">다른 참가자 확인하기</button>
@@ -72,6 +73,10 @@
     </div>
     <div class="stamp" id="tkStamp">목적지 선택 시<br>스탬프가 표시됩니다</div>
   </div>
+
+  <div class="panel button-row" id="afterBookingRow" style="display:none;">
+    <button class="btn btn-orange" id="toOtherRoutes">다른 참가자 확인하기</button>
+  </div>
 </section>
 
 <!-- ============ PAGE 5 : 다른 사용자 둘러보기 (route map) ============ -->
@@ -92,7 +97,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="data.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="data.js?v=11"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
