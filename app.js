@@ -2,8 +2,8 @@
    CONFIG — paste your Supabase project details here once you've
    created a free project at https://supabase.com (see README.md).
    ============================================================ */
-const SUPABASE_URL = "https://tutpntazzwfgwfnvuwjb.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1dHBudGF6endmZ3dmbnZ1d2piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1MTQ1NzksImV4cCI6MjEwMjA5MDU3OX0.g-NXuCzBS7KQ9lzhbsJLlFNB1RiwGH40U8N0PCovaOU";
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
 
 let supabaseClient = null;
 if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
@@ -271,13 +271,6 @@ let fromCoords = null, toCoords = null;
 let booking = {};
 
 function initPage2() {
-  const dl = document.getElementById("airportList");
-  AIRPORTS.forEach(a => {
-    const opt = document.createElement("option");
-    opt.value = a.name;
-    dl.appendChild(opt);
-  });
-
   map2 = L.map("map2").setView([37.5, 127], 5);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors"
@@ -288,12 +281,64 @@ function initPage2() {
   fromCoords = { name: icn.name, lat: icn.lat, lon: icn.lon };
   updateRouteMap();
 
-  document.getElementById("bTo").addEventListener("change", (e) => {
-    const a = AIRPORTS.find(a => a.name === e.target.value);
-    if (a) { toCoords = { ...a }; updateRouteMap(); }
-  });
+  initToAutocomplete();
+
   ["bName", "bReason"].forEach(id => {
     document.getElementById(id).addEventListener("input", updateTicketPreview);
+  });
+}
+
+// custom search box for TO — matches English name/IATA code AND Korean
+// aliases (e.g. typing "도쿄" finds "Tokyo/Narita (NRT)"), and shows
+// nothing until the person actually starts typing
+function initToAutocomplete() {
+  const input = document.getElementById("bTo");
+  const list = document.getElementById("bToSuggestions");
+
+  function renderMatches(query) {
+    const q = query.trim().toLowerCase();
+    if (!q) { list.classList.remove("open"); list.innerHTML = ""; return; }
+
+    const matches = AIRPORTS.filter(a => {
+      if (a.name.toLowerCase().includes(q)) return true;
+      if (a.iata.toLowerCase().includes(q)) return true;
+      if (a.country.toLowerCase().includes(q)) return true;
+      if (a.korean && a.korean.some(k => k.includes(query.trim()))) return true;
+      return false;
+    }).slice(0, 8);
+
+    if (matches.length === 0) {
+      list.innerHTML = `<div class="autocomplete-empty">일치하는 도시가 없습니다</div>`;
+    } else {
+      list.innerHTML = matches.map(a =>
+        `<div class="autocomplete-item" data-name="${a.name}">${a.name}</div>`
+      ).join("");
+    }
+    list.classList.add("open");
+  }
+
+  input.addEventListener("input", () => {
+    renderMatches(input.value);
+    // if they're typing again, the previous selection (if any) no longer applies
+    if (toCoords && input.value.trim() !== toCoords.name) toCoords = null;
+  });
+  input.addEventListener("focus", () => { if (input.value.trim()) renderMatches(input.value); });
+
+  list.addEventListener("mousedown", (e) => {
+    // mousedown (not click) so this fires before the input's blur hides the list
+    const item = e.target.closest(".autocomplete-item");
+    if (!item || !item.dataset.name) return;
+    const a = AIRPORTS.find(a => a.name === item.dataset.name);
+    if (a) {
+      input.value = a.name;
+      toCoords = { ...a };
+      updateRouteMap();
+    }
+    list.classList.remove("open");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".autocomplete-wrap")) list.classList.remove("open");
   });
 }
 
