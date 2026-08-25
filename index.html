@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>항공권 예매</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -39,8 +39,10 @@
       <p class="hint-inline">핀을 드래그하여 시작지점을 설정하세요.</p>
 
       <label>TO</label>
-      <input list="airportList" id="bTo" placeholder="도시 또는 공항 검색 (기본: Seoul)">
-      <datalist id="airportList"></datalist>
+      <div class="autocomplete-wrap">
+        <input type="text" id="bTo" autocomplete="off" placeholder="도시 이름을 입력하세요 (예: 도쿄, Tokyo)">
+        <div id="bToSuggestions" class="autocomplete-list"></div>
+      </div>
 
       <label>이 목적지는 어떤 것을 상징하나요? <span class="hint-inline">(다른 사용자들에게 표시됩니다)</span></label>
       <textarea id="bReason" rows="2" maxlength="100" placeholder="예: 새로운 시작"></textarea>
@@ -97,7 +99,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="data.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="data.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
