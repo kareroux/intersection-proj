@@ -49,6 +49,17 @@ body{
   padding:10px; border-radius:6px; border:1px solid #ccc; font-size:0.95rem; font-family:inherit;
 }
 .map-col{ flex:1; }
+
+.autocomplete-wrap{ position: relative; }
+.autocomplete-list{
+  display:none; position:absolute; top:100%; left:0; right:0; z-index:20;
+  background:#fff; border:1px solid #ccc; border-radius:6px; margin-top:4px;
+  max-height:220px; overflow-y:auto; box-shadow:0 4px 10px rgba(0,0,0,0.1);
+}
+.autocomplete-list.open{ display:block; }
+.autocomplete-item{ padding:8px 10px; cursor:pointer; font-size:0.9rem; }
+.autocomplete-item:hover{ background: var(--gray-bg); }
+.autocomplete-empty{ padding:8px 10px; font-size:0.85rem; color:#888; }
 .map-med{ height:340px; border-radius: var(--radius); }
 .hint{ font-size:0.8rem; color:#a33; min-height:1.2em; }
 .hint-inline{ font-weight:400; font-size:0.78rem; color:#666; }
