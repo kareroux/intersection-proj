@@ -2,8 +2,8 @@
    CONFIG — paste your Supabase project details here once you've
    created a free project at https://supabase.com (see README.md).
    ============================================================ */
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+const SUPABASE_URL = "https://tutpntazzwfgwfnvuwjb.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1dHBudGF6endmZ3dmbnZ1d2piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1MTQ1NzksImV4cCI6MjEwMjA5MDU3OX0.g-NXuCzBS7KQ9lzhbsJLlFNB1RiwGH40U8N0PCovaOU";
 
 let supabaseClient = null;
 if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
