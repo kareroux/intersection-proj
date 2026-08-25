@@ -39,6 +39,7 @@ body{
 .side-col{ width: 280px; display:flex; flex-direction:column; gap:10px; }
 .box{ border-radius: var(--radius); padding:16px; color:#fff; font-size:0.95rem; }
 .box-blue{ background: var(--blue); flex:1; }
+.flight-poem{ margin-top: 18px; font-size: 0.85rem; line-height: 1.6; opacity: 0.92; }
 
 /* ---------- PAGE 2 : booking form + map ---------- */
 .two-col{ display:flex; gap:24px; }
@@ -62,13 +63,22 @@ body{
 .bp-title{ font-weight:700; font-size:1.1rem; }
 .qr{ width:100px; height:100px; margin-top:8px; }
 .stamp{
-  width:130px; height:130px; border-radius:50%; border:3px solid #4f97d6;
+  width:130px; height:130px; border-radius:50%; border:3px double #4f97d6;
   display:flex; align-items:center; justify-content:center; text-align:center;
   font-size:0.8rem; font-weight:600; color:#4f97d6; padding:10px;
   transform: rotate(-8deg);
 }
+.stamp-flag{
+  width:50px; border-radius:4px;
+  filter: grayscale(0.4) sepia(0.3) contrast(1.3) saturate(1.4);
+  opacity: 0.85;
+  mix-blend-mode: multiply;
+}
 
 .placeholder-text{ color:rgba(255,255,255,0.85); font-style:italic; }
+
+.button-row{ display:flex; gap:16px; }
+.button-row .btn{ width:auto; flex:1; }
 
 /* ---------- PAGE 5 : route lines on the map get a hover affordance ---------- */
 .route-line{ cursor:pointer; }
