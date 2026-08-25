@@ -90,16 +90,26 @@ function initMap1() {
   setInterval(loadFlights, POLL_MS);
 }
 
+let debugVisible = false;
 function setStatusLine(msg) {
   let el = document.getElementById("flightStatusLine");
   if (!el) {
     el = document.createElement("p");
     el.id = "flightStatusLine";
     el.style.cssText = "font-size:0.7rem;opacity:0.75;margin-top:6px;";
+    el.style.display = debugVisible ? "block" : "none";
     document.getElementById("flightInfo").after(el);
   }
   el.textContent = msg;
 }
+// hidden by default — press "v" anywhere on page 1 to toggle it on/off (for our own debugging only)
+document.addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() !== "v") return;
+  if (document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  debugVisible = !debugVisible;
+  const el = document.getElementById("flightStatusLine");
+  if (el) el.style.display = debugVisible ? "block" : "none";
+});
 
 // XMLHttpRequest-based GET with a timeout, wrapped as a Promise.
 // Resolves to { status, text } on any completed response (even non-2xx),
@@ -207,8 +217,9 @@ async function loadFlights() {
 
   consecutiveFailures++;
   const summary = history.join(" | ");
-  infoEl.innerHTML =
-    `실시간 항공편 정보를 불러올 수 없습니다.<br><span style="font-size:0.75rem;opacity:0.85">(${summary}${consecutiveFailures > 1 ? " · " + consecutiveFailures + "회 연속 실패" : ""})</span>`;
+  infoEl.innerHTML = `실시간 항공편 정보를 잠시 불러올 수 없습니다. 잠시 후 자동으로 다시 시도합니다.
+    <button id="retryFlights" class="chip" style="margin-top:8px;">지금 다시 시도</button>`;
+  document.getElementById("retryFlights").addEventListener("click", loadFlights);
   setStatusLine(`[DEBUG] 모든 시도 실패 → ${summary}`);
   if (consecutiveFailures >= 2) setTimeout(loadFlights, POLL_MS * 5);
 }
@@ -335,6 +346,12 @@ function updateTicketPreview() {
     ? `FROM ${fromCoords.name} \u2192 TO ${toCoords.name}` : "—";
   document.getElementById("tkSeat").textContent = "SEAT: " + (booking.seat || "—");
 
+  const qrPayload = booking.seat
+    ? `${location.href.split("?")[0]}?seat=${encodeURIComponent(booking.seat)}`
+    : location.href.split("?")[0];
+  document.getElementById("tkQr").src =
+    `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrPayload)}`;
+
   if (fromCoords && toCoords) {
     const dist = haversine(fromCoords.lat, fromCoords.lon, toCoords.lat, toCoords.lon);
     document.getElementById("tkDistTime").textContent =
@@ -345,7 +362,7 @@ function updateTicketPreview() {
 
   const stamp = document.getElementById("tkStamp");
   stamp.innerHTML = (toCoords && toCoords.iso2)
-    ? `<img src="https://flagcdn.com/w80/${toCoords.iso2}.png" style="width:50px;border-radius:4px;"><br>${toCoords.country}`
+    ? `<img src="https://flagcdn.com/w80/${toCoords.iso2}.png" class="stamp-flag"><br>${toCoords.country}`
     : "\ubaa9\uc801\uc9c0 \uc120\ud0dd \uc2dc<br>\uc2a4\ud0ec\ud504\uac00 \ud45c\uc2dc\ub429\ub2c8\ub2e4";
 }
 
@@ -383,9 +400,12 @@ document.getElementById("toTicket").addEventListener("click", async () => {
   booking = saved;
   updateTicketPreview();
 
-  // brief pause so the person actually sees their finished ticket before we move on
-  setTimeout(() => goTo("page5"), 1200);
+  document.getElementById("bHint").style.color = "#2a7";
+  document.getElementById("bHint").textContent = "티켓이 확정되었습니다!";
+  document.getElementById("afterBookingRow").style.display = "flex";
 });
+
+document.getElementById("toOtherRoutes").addEventListener("click", () => goTo("page5"));
 
 /* ============================================================
    PAGE 5 — 다른 사용자 둘러보기: every booked trip as a curved
@@ -399,6 +419,16 @@ function initMap5() {
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors"
   }).addTo(map5);
+}
+
+// deterministic shade of blue per booking, so it's stable across reloads
+function shadeForBooking(b) {
+  const str = String(b.id || (b.name + b.seat + b.created_at));
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  const hue = 195 + (hash % 45);        // blue-ish range
+  const light = 40 + (hash % 30);       // varied lightness
+  return `hsl(${hue}, 70%, ${light}%)`;
 }
 
 async function renderRoutesPage() {
@@ -419,11 +449,12 @@ async function renderRoutesPage() {
   const allPoints = [];
   bookings.forEach(b => {
     if (b.from_lat == null || b.to_lat == null) return;
+    const baseColor = shadeForBooking(b);
     const arc = curvedPath([b.from_lat, b.from_lon], [b.to_lat, b.to_lon]);
-    const line = L.polyline(arc, { color: "#4f97d6", weight: 2.5, opacity: 0.75, className: "route-line" }).addTo(map5);
-    line.on("click", () => selectRoute(line, b));
+    const line = L.polyline(arc, { color: baseColor, weight: 2.5, opacity: 0.85, className: "route-line" }).addTo(map5);
+    line.on("click", () => selectRoute(line, b, baseColor));
     line.on("mouseover", () => line.setStyle({ weight: 4, opacity: 1 }));
-    line.on("mouseout", () => { if (line !== selectedRouteLayer) line.setStyle({ weight: 2.5, opacity: 0.75 }); });
+    line.on("mouseout", () => { if (line !== selectedRouteLayer) line.setStyle({ color: baseColor, weight: 2.5, opacity: 0.85 }); });
     routeLayers.push(line);
     allPoints.push([b.from_lat, b.from_lon], [b.to_lat, b.to_lon]);
   });
@@ -431,8 +462,11 @@ async function renderRoutesPage() {
   if (allPoints.length) map5.fitBounds(allPoints, { padding: [40, 40] });
 }
 
-function selectRoute(line, b) {
-  if (selectedRouteLayer) selectedRouteLayer.setStyle({ color: "#4f97d6", weight: 2.5, opacity: 0.75 });
+function selectRoute(line, b, baseColor) {
+  if (selectedRouteLayer && selectedRouteLayer._baseColor) {
+    selectedRouteLayer.setStyle({ color: selectedRouteLayer._baseColor, weight: 2.5, opacity: 0.85 });
+  }
+  line._baseColor = baseColor;
   line.setStyle({ color: "#e69a4a", weight: 4, opacity: 1 });
   selectedRouteLayer = line;
 
